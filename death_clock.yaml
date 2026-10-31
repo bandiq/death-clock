@@ -19,8 +19,8 @@ ota:
   - platform: esphome
 
 wifi:
-  ssid: !secret wifi_ssid
-  password: !secret wifi_password
+  ssid: "REMOVED"
+  password: "REMOVED"
   ap:
     ssid: death-clock Fallback Hotspot
     password: "REMOVED"
@@ -48,7 +48,9 @@ time:
     id: homeassistant_time
 
 font:
-  - file: "gfonts://Silkscreen"
+  - file:
+      type: web
+      url: "https://raw.githubusercontent.com/olikraus/u8g2/master/tools/font/ttf/lucasfont_alternate.ttf"
     id: matrix_font
     size: 8
     glyphs: " !\"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[]_abcdefghijklmnopqrstuvwxyz"
@@ -57,7 +59,7 @@ display:
   - platform: max7219digit
     id: matrix
     cs_pin: GPIO4
-    num_chips: 4
+    num_chips: 8
     intensity: 5
     rotate_chip: 0
     scroll_enable: true
@@ -67,22 +69,23 @@ display:
     scroll_delay: 1500ms
     update_interval: 500ms
     lambda: |-
+      const int y = -3;
       std::string msg = id(display_text).state;
       if (!msg.empty() && msg != "unknown" && msg != "unavailable") {
-        it.print(0, 0, id(matrix_font), msg.c_str());
+        it.print(0, y, id(matrix_font), msg.c_str());
         return;
       }
 
       auto now = id(homeassistant_time).now();
       float target = id(countdown_target).state;
       if (!now.is_valid() || isnan(target)) {
-        it.print(0, 0, id(matrix_font), "--:--");
+        it.print(0, y, id(matrix_font), "--:--");
         return;
       }
 
       int64_t remaining = (int64_t) target - (int64_t) now.timestamp;
       if (remaining <= 0) {
-        it.print(0, 0, id(matrix_font), "DEAD");
+        it.print(0, y, id(matrix_font), "DEAD");
         return;
       }
 
@@ -92,11 +95,11 @@ display:
       int seconds = remaining % 60;
 
       if (days > 0) {
-        it.printf(0, 0, id(matrix_font), "%dd%02dh", days, hours);
+        it.printf(0, y, id(matrix_font), "%dd%02dh", days, hours);
       } else if (hours > 0) {
-        it.printf(0, 0, id(matrix_font), "%02d:%02d", hours, minutes);
+        it.printf(0, y, id(matrix_font), "%02d:%02d", hours, minutes);
       } else {
-        it.printf(0, 0, id(matrix_font), "%02d:%02d", minutes, seconds);
+        it.printf(0, y, id(matrix_font), "%02d:%02d", minutes, seconds);
       }
 
 number:
