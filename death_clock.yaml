@@ -13,19 +13,19 @@ logger:
 
 api:
   encryption:
-    key: "REMOVED"
+    key: !secret death_clock_api_key
 
 ota:
   - platform: esphome
 
 wifi:
-  ssid: "REMOVED"
-  password: "REMOVED"
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
   # C3 Super Mini antenna detunes at full TX power, causing 'Auth Expired'
   output_power: 8.5dB
   ap:
     ssid: death-clock Fallback Hotspot
-    password: "REMOVED"
+    password: !secret death_clock_ap_password
 
 captive_portal:
 
