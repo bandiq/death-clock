@@ -136,7 +136,12 @@ display:
           it.print(cx, y, id(matrix_font), TextAlign::TOP_CENTER, "--:--:--");
           return;
         }
-        it.strftime(cx, y, id(matrix_font), TextAlign::TOP_CENTER, "%a %H:%M:%S", now);
+        if (id(clock_show_date)) {
+          it.printf(cx, y, id(matrix_font), TextAlign::TOP_CENTER, "%d %s",
+                    now.day_of_month, now.strftime("%b %Y").c_str());
+        } else {
+          it.strftime(cx, y, id(matrix_font), TextAlign::TOP_CENTER, "%a %H:%M:%S", now);
+        }
         return;
       }
 
@@ -175,6 +180,9 @@ globals:
   - id: sw_elapsed_ms
     type: uint32_t
     initial_value: "0"
+  - id: clock_show_date
+    type: bool
+    initial_value: "false"
   # Kitchen timer: 0 idle, 1 setting, 2 running, 3 paused, 4 expired
   - id: kt_state
     type: int
@@ -264,6 +272,12 @@ script:
   - id: led_restore
     then:
       - lambda: id(orange_led_output).set_state(id(orange_led).current_values.is_on());
+  - id: show_date
+    mode: restart
+    then:
+      - lambda: "id(clock_show_date) = true;"
+      - delay: 3s
+      - lambda: "id(clock_show_date) = false;"
   - id: kt_add
     then:
       - lambda: |-
@@ -402,6 +416,11 @@ binary_sensor:
           then:
             - script.execute: buzzer_alarm_stop
           else:
+            - if:
+                condition:
+                  lambda: 'return id(display_mode).current_option() == "Clock";'
+                then:
+                  - script.execute: show_date
             - if:
                 condition:
                   lambda: 'return id(display_mode).current_option() == "Stopwatch";'
