@@ -75,6 +75,20 @@ display:
       const int cx = it.get_width() / 2;
       auto mode = id(display_mode).current_option();
 
+      // 8x8 icons drawn at the far left, one byte per row, MSB is the leftmost column
+      static const uint8_t ICON_HOURGLASS[8] = {0xFE, 0x7C, 0x38, 0x10, 0x10, 0x28, 0x44, 0xFE};
+      static const uint8_t ICON_STOPWATCH[8] = {0x38, 0x10, 0x7C, 0x92, 0x92, 0x8A, 0x82, 0x7C};
+      static const uint8_t ICON_SKULL[8]     = {0x7C, 0xFE, 0x92, 0x92, 0xEE, 0x7C, 0x54, 0x7C};
+      auto draw_icon = [&](const uint8_t *rows) {
+        for (int r = 0; r < 8; r++) {
+          for (int c = 0; c < 8; c++) {
+            if (rows[r] & (0x80 >> c)) {
+              it.draw_pixel_at(c, r, Color::WHITE);
+            }
+          }
+        }
+      };
+
       if (mode == "Text") {
         std::string msg = id(display_text).state;
         if (msg.empty() || msg == "unknown" || msg == "unavailable") {
@@ -85,6 +99,7 @@ display:
       }
 
       if (mode == "Timer") {
+        draw_icon(ICON_HOURGLASS);
         int state = id(kt_state);
         if (state == 0) {
           it.print(cx, y, id(matrix_font), TextAlign::TOP_CENTER, "timer");
@@ -113,6 +128,7 @@ display:
       }
 
       if (mode == "Stopwatch") {
+        draw_icon(ICON_STOPWATCH);
         uint32_t ms = id(sw_elapsed_ms);
         if (id(sw_running)) {
           ms += millis() - id(sw_start_ms);
@@ -145,15 +161,17 @@ display:
         return;
       }
 
+      draw_icon(ICON_SKULL);
+      const int rx = it.get_width();
       float target = id(countdown_target).state;
       if (!now.is_valid() || isnan(target)) {
-        it.print(cx, y, id(matrix_font), TextAlign::TOP_CENTER, "--:--");
+        it.print(rx, y, id(matrix_font), TextAlign::TOP_RIGHT, "--:--");
         return;
       }
 
       int64_t remaining = (int64_t) target - (int64_t) now.timestamp;
       if (remaining <= 0) {
-        it.print(cx, y, id(matrix_font), TextAlign::TOP_CENTER, "DEAD");
+        it.print(rx, y, id(matrix_font), TextAlign::TOP_RIGHT, "DEAD");
         return;
       }
 
@@ -163,11 +181,11 @@ display:
       int seconds = remaining % 60;
 
       if (days > 0) {
-        it.printf(cx, y, id(matrix_font), TextAlign::TOP_CENTER, "%dd%02dh", days, hours);
+        it.printf(rx, y, id(matrix_font), TextAlign::TOP_RIGHT, "%dd%02dh", days, hours);
       } else if (hours > 0) {
-        it.printf(cx, y, id(matrix_font), TextAlign::TOP_CENTER, "%02d:%02d", hours, minutes);
+        it.printf(rx, y, id(matrix_font), TextAlign::TOP_RIGHT, "%02d:%02d", hours, minutes);
       } else {
-        it.printf(cx, y, id(matrix_font), TextAlign::TOP_CENTER, "%02d:%02d", minutes, seconds);
+        it.printf(rx, y, id(matrix_font), TextAlign::TOP_RIGHT, "%02d:%02d", minutes, seconds);
       }
 
 globals:

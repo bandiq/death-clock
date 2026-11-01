@@ -45,6 +45,8 @@ Button 1 cycles through the modes, or choose one from **Display Mode** in Home A
 | Countdown | Time left until a target time, e.g. `12d04h`, `05:30`, then `DEAD` | — |
 | Text | A message from Home Assistant, scrolling if it's too long | — |
 
+Timer, Stopwatch and Countdown modes show an icon at the far left: an hourglass, a stopwatch and a skull respectively.
+
 ### Kitchen timer
 
 - **Setting:** with the display showing `timer`, each press of button 2 adds 5 minutes. Holding it adds time quickly. The maximum is 9:55:00.
