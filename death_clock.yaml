@@ -84,6 +84,34 @@ display:
         return;
       }
 
+      if (mode == "Timer") {
+        int state = id(kt_state);
+        if (state == 0) {
+          it.print(cx, y, id(matrix_font), TextAlign::TOP_CENTER, "timer");
+          return;
+        }
+        uint32_t ms = id(kt_ms);
+        if (state == 2) {
+          int32_t left = id(kt_end_ms) - millis();
+          ms = left > 0 ? left : 0;
+        } else if (state == 4) {
+          ms = 0;
+        }
+        bool blink = state == 3 || state == 4;
+        if (blink && millis() % 1000 >= 500) {
+          return;
+        }
+        int total = (ms + 999) / 1000;
+        if (total >= 3600) {
+          it.printf(cx, y, id(matrix_font), TextAlign::TOP_CENTER, "%d:%02d:%02d",
+                    total / 3600, (total / 60) % 60, total % 60);
+        } else {
+          it.printf(cx, y, id(matrix_font), TextAlign::TOP_CENTER, "%02d:%02d",
+                    total / 60, total % 60);
+        }
+        return;
+      }
+
       if (mode == "Stopwatch") {
         uint32_t ms = id(sw_elapsed_ms);
         if (id(sw_running)) {
@@ -147,6 +175,17 @@ globals:
   - id: sw_elapsed_ms
     type: uint32_t
     initial_value: "0"
+  # Kitchen timer: 0 idle, 1 setting, 2 running, 3 paused, 4 expired
+  - id: kt_state
+    type: int
+    initial_value: "0"
+  # Set duration while setting, remaining time while paused
+  - id: kt_ms
+    type: uint32_t
+    initial_value: "0"
+  - id: kt_end_ms
+    type: uint32_t
+    initial_value: "0"
 
 script:
   - id: sw_toggle
@@ -203,21 +242,80 @@ script:
       - repeat:
           count: 90
           then:
+            - output.turn_on: orange_led_output
             - script.execute:
                 id: piezo_on
                 freq: 3000
             - delay: 100ms
             - script.execute: piezo_off
+            - output.turn_off: orange_led_output
             - delay: 100ms
             - if:
                 condition:
                   lambda: "return iteration % 3 == 2;"
                 then:
                   - delay: 400ms
+      - script.execute: led_restore
   - id: buzzer_alarm_stop
     then:
       - script.stop: buzzer_alarm
       - script.execute: piezo_off
+      - script.execute: led_restore
+  - id: led_restore
+    then:
+      - lambda: id(orange_led_output).set_state(id(orange_led).current_values.is_on());
+  - id: kt_add
+    then:
+      - lambda: |-
+          const uint32_t step = 5 * 60 * 1000;
+          const uint32_t max_ms = (9 * 60 + 55) * 60 * 1000;
+          id(kt_ms) = std::min(id(kt_ms) + step, max_ms);
+          id(kt_state) = 1;
+  - id: kt_fast_add
+    mode: restart
+    then:
+      - delay: 600ms
+      - repeat:
+          count: 120
+          then:
+            - script.execute: kt_add
+            - script.execute: beep
+            - delay: 150ms
+  - id: kt_autostart
+    mode: restart
+    then:
+      - delay: 3s
+      - if:
+          condition:
+            lambda: "return id(kt_state) == 1;"
+          then:
+            - lambda: |-
+                id(kt_end_ms) = millis() + id(kt_ms);
+                id(kt_state) = 2;
+            - script.execute: beep
+  - id: kt_toggle
+    then:
+      - lambda: |-
+          if (id(kt_state) == 2) {
+            int32_t left = id(kt_end_ms) - millis();
+            id(kt_ms) = left > 0 ? left : 0;
+            id(kt_state) = 3;
+          } else if (id(kt_state) == 3) {
+            id(kt_end_ms) = millis() + id(kt_ms);
+            id(kt_state) = 2;
+          }
+  - id: kt_reset
+    then:
+      - script.stop: kt_autostart
+      - script.stop: kt_fast_add
+      - lambda: |-
+          id(kt_state) = 0;
+          id(kt_ms) = 0;
+  - id: kt_hold_reset
+    mode: restart
+    then:
+      - delay: 1s
+      - script.execute: kt_reset
 
 select:
   - platform: template
@@ -225,6 +323,7 @@ select:
     id: display_mode
     options:
       - Clock
+      - Timer
       - Stopwatch
       - Countdown
       - Text
@@ -309,9 +408,30 @@ binary_sensor:
                 then:
                   - script.execute: sw_toggle
                   - script.execute: sw_hold_reset
+            - if:
+                condition:
+                  lambda: 'return id(display_mode).current_option() == "Timer";'
+                then:
+                  - if:
+                      condition:
+                        lambda: "return id(kt_state) == 0 || id(kt_state) == 1;"
+                      then:
+                        - script.stop: kt_autostart
+                        - script.execute: kt_add
+                        - script.execute: kt_fast_add
+                      else:
+                        - script.execute: kt_toggle
+                        - script.execute: kt_hold_reset
             - script.execute: beep
     on_release:
       - script.stop: sw_hold_reset
+      - script.stop: kt_hold_reset
+      - script.stop: kt_fast_add
+      - if:
+          condition:
+            lambda: "return id(kt_state) == 1;"
+          then:
+            - script.execute: kt_autostart
 
 button:
   - platform: template
@@ -330,6 +450,27 @@ button:
     name: "Alarm Stop"
     on_press:
       - script.execute: buzzer_alarm_stop
+
+interval:
+  - interval: 100ms
+    then:
+      - if:
+          condition:
+            lambda: "return id(kt_state) == 2 && (int32_t) (id(kt_end_ms) - millis()) <= 0;"
+          then:
+            - lambda: "id(kt_state) = 4;"
+            - select.set:
+                id: display_mode
+                option: Timer
+            - script.execute: buzzer_alarm
+      - if:
+          condition:
+            and:
+              - lambda: "return id(kt_state) == 4;"
+              - not:
+                  script.is_running: buzzer_alarm
+          then:
+            - script.execute: kt_reset
 
 number:
   - platform: template
