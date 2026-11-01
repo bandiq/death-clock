@@ -21,6 +21,8 @@ ota:
 wifi:
   ssid: "REMOVED"
   password: "REMOVED"
+  # C3 Super Mini antenna detunes at full TX power, causing 'Auth Expired'
+  output_power: 8.5dB
   ap:
     ssid: death-clock Fallback Hotspot
     password: "REMOVED"
@@ -167,6 +169,55 @@ script:
     then:
       - delay: 1s
       - script.execute: sw_reset
+  - id: piezo_on
+    parameters:
+      freq: float
+    then:
+      - lambda: |-
+          id(piezo_a).update_frequency(freq);
+          id(piezo_b).update_frequency(freq);
+          id(piezo_a).set_level(0.5);
+          id(piezo_b).set_level(0.5);
+  - id: piezo_off
+    then:
+      - lambda: |-
+          id(piezo_a).set_level(0);
+          id(piezo_b).set_level(0);
+  - id: beep
+    mode: restart
+    then:
+      - if:
+          condition:
+            not:
+              script.is_running: buzzer_alarm
+          then:
+            - script.execute:
+                id: piezo_on
+                freq: 3000
+            - delay: 30ms
+            - script.execute: piezo_off
+  - id: buzzer_alarm
+    mode: restart
+    then:
+      - script.stop: beep
+      - repeat:
+          count: 90
+          then:
+            - script.execute:
+                id: piezo_on
+                freq: 3000
+            - delay: 100ms
+            - script.execute: piezo_off
+            - delay: 100ms
+            - if:
+                condition:
+                  lambda: "return iteration % 3 == 2;"
+                then:
+                  - delay: 400ms
+  - id: buzzer_alarm_stop
+    then:
+      - script.stop: buzzer_alarm
+      - script.execute: piezo_off
 
 select:
   - platform: template
@@ -181,13 +232,44 @@ select:
     restore_value: true
     optimistic: true
 
-# Momentary buttons, normally open, to GND
+# Each button bridges a GPIO held low (output) to a GPIO with pull-up (input)
+output:
+  - platform: gpio
+    id: button_mode_drive
+    pin: GPIO21
+  - platform: gpio
+    id: button_action_drive
+    pin: GPIO6
+  - platform: ledc
+    id: piezo_a
+    pin: GPIO7
+    channel: 0
+    frequency: 3000Hz
+  # Same LEDC timer as piezo_a (channels 0/1), 180° out of phase for push-pull drive
+  - platform: ledc
+    id: piezo_b
+    pin: GPIO20
+    channel: 1
+    frequency: 3000Hz
+    phase_angle: 180°
+  - platform: gpio
+    id: orange_led_output
+    pin:
+      number: GPIO5
+      inverted: true
+
+light:
+  - platform: binary
+    name: "Orange LED"
+    id: orange_led
+    output: orange_led_output
+
 binary_sensor:
   - platform: gpio
     id: button_mode
     internal: true
     pin:
-      number: GPIO1
+      number: GPIO10
       inverted: true
       mode:
         input: true
@@ -196,14 +278,16 @@ binary_sensor:
       - delayed_on: 20ms
       - delayed_off: 20ms
     on_press:
+      - script.execute: beep
       - select.next:
           id: display_mode
           cycle: true
+  # GPIO8 is a strapping pin and drives the onboard LED, so it lights while pressed
   - platform: gpio
     id: button_action
     internal: true
     pin:
-      number: GPIO2
+      number: GPIO8
       inverted: true
       ignore_strapping_warning: true
       mode:
@@ -215,10 +299,17 @@ binary_sensor:
     on_press:
       - if:
           condition:
-            lambda: 'return id(display_mode).current_option() == "Stopwatch";'
+            script.is_running: buzzer_alarm
           then:
-            - script.execute: sw_toggle
-            - script.execute: sw_hold_reset
+            - script.execute: buzzer_alarm_stop
+          else:
+            - if:
+                condition:
+                  lambda: 'return id(display_mode).current_option() == "Stopwatch";'
+                then:
+                  - script.execute: sw_toggle
+                  - script.execute: sw_hold_reset
+            - script.execute: beep
     on_release:
       - script.stop: sw_hold_reset
 
@@ -231,6 +322,14 @@ button:
     name: "Stopwatch Reset"
     on_press:
       - script.execute: sw_reset
+  - platform: template
+    name: "Alarm"
+    on_press:
+      - script.execute: buzzer_alarm
+  - platform: template
+    name: "Alarm Stop"
+    on_press:
+      - script.execute: buzzer_alarm_stop
 
 number:
   - platform: template
