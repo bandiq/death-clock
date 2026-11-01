@@ -28,7 +28,7 @@ wifi:
 captive_portal:
 
 spi:
-  clk_pin: GPIO1
+  clk_pin: GPIO3
   mosi_pin: GPIO0
 
 text_sensor:
@@ -67,25 +67,58 @@ display:
     scroll_speed: 250ms
     scroll_dwell: 1000ms
     scroll_delay: 1500ms
-    update_interval: 500ms
+    update_interval: 100ms
     lambda: |-
       const int y = -3;
-      std::string msg = id(display_text).state;
-      if (!msg.empty() && msg != "unknown" && msg != "unavailable") {
+      const int cx = it.get_width() / 2;
+      auto mode = id(display_mode).current_option();
+
+      if (mode == "Text") {
+        std::string msg = id(display_text).state;
+        if (msg.empty() || msg == "unknown" || msg == "unavailable") {
+          msg = "(no text)";
+        }
         it.print(0, y, id(matrix_font), msg.c_str());
         return;
       }
 
+      if (mode == "Stopwatch") {
+        uint32_t ms = id(sw_elapsed_ms);
+        if (id(sw_running)) {
+          ms += millis() - id(sw_start_ms);
+        }
+        int tenths = (ms / 100) % 10;
+        int total = ms / 1000;
+        if (total >= 3600) {
+          it.printf(cx, y, id(matrix_font), TextAlign::TOP_CENTER, "%d:%02d:%02d.%d",
+                    total / 3600, (total / 60) % 60, total % 60, tenths);
+        } else {
+          it.printf(cx, y, id(matrix_font), TextAlign::TOP_CENTER, "%02d:%02d.%d",
+                    total / 60, total % 60, tenths);
+        }
+        return;
+      }
+
       auto now = id(homeassistant_time).now();
+
+      if (mode == "Clock") {
+        if (!now.is_valid()) {
+          it.print(cx, y, id(matrix_font), TextAlign::TOP_CENTER, "--:--:--");
+          return;
+        }
+        it.strftime(cx, y, id(matrix_font), TextAlign::TOP_CENTER, "%a %H:%M:%S", now);
+        return;
+      }
+
       float target = id(countdown_target).state;
       if (!now.is_valid() || isnan(target)) {
-        it.print(0, y, id(matrix_font), "--:--");
+        it.print(cx, y, id(matrix_font), TextAlign::TOP_CENTER, "--:--");
         return;
       }
 
       int64_t remaining = (int64_t) target - (int64_t) now.timestamp;
       if (remaining <= 0) {
-        it.print(0, y, id(matrix_font), "DEAD");
+        it.print(cx, y, id(matrix_font), TextAlign::TOP_CENTER, "DEAD");
         return;
       }
 
@@ -95,12 +128,109 @@ display:
       int seconds = remaining % 60;
 
       if (days > 0) {
-        it.printf(0, y, id(matrix_font), "%dd%02dh", days, hours);
+        it.printf(cx, y, id(matrix_font), TextAlign::TOP_CENTER, "%dd%02dh", days, hours);
       } else if (hours > 0) {
-        it.printf(0, y, id(matrix_font), "%02d:%02d", hours, minutes);
+        it.printf(cx, y, id(matrix_font), TextAlign::TOP_CENTER, "%02d:%02d", hours, minutes);
       } else {
-        it.printf(0, y, id(matrix_font), "%02d:%02d", minutes, seconds);
+        it.printf(cx, y, id(matrix_font), TextAlign::TOP_CENTER, "%02d:%02d", minutes, seconds);
       }
+
+globals:
+  - id: sw_running
+    type: bool
+    initial_value: "false"
+  - id: sw_start_ms
+    type: uint32_t
+    initial_value: "0"
+  - id: sw_elapsed_ms
+    type: uint32_t
+    initial_value: "0"
+
+script:
+  - id: sw_toggle
+    then:
+      - lambda: |-
+          if (id(sw_running)) {
+            id(sw_elapsed_ms) += millis() - id(sw_start_ms);
+            id(sw_running) = false;
+          } else {
+            id(sw_start_ms) = millis();
+            id(sw_running) = true;
+          }
+  - id: sw_reset
+    then:
+      - lambda: |-
+          id(sw_running) = false;
+          id(sw_elapsed_ms) = 0;
+  - id: sw_hold_reset
+    mode: restart
+    then:
+      - delay: 1s
+      - script.execute: sw_reset
+
+select:
+  - platform: template
+    name: "Display Mode"
+    id: display_mode
+    options:
+      - Clock
+      - Stopwatch
+      - Countdown
+      - Text
+    initial_option: Clock
+    restore_value: true
+    optimistic: true
+
+# Momentary buttons, normally open, to GND
+binary_sensor:
+  - platform: gpio
+    id: button_mode
+    internal: true
+    pin:
+      number: GPIO1
+      inverted: true
+      mode:
+        input: true
+        pullup: true
+    filters:
+      - delayed_on: 20ms
+      - delayed_off: 20ms
+    on_press:
+      - select.next:
+          id: display_mode
+          cycle: true
+  - platform: gpio
+    id: button_action
+    internal: true
+    pin:
+      number: GPIO2
+      inverted: true
+      ignore_strapping_warning: true
+      mode:
+        input: true
+        pullup: true
+    filters:
+      - delayed_on: 20ms
+      - delayed_off: 20ms
+    on_press:
+      - if:
+          condition:
+            lambda: 'return id(display_mode).current_option() == "Stopwatch";'
+          then:
+            - script.execute: sw_toggle
+            - script.execute: sw_hold_reset
+    on_release:
+      - script.stop: sw_hold_reset
+
+button:
+  - platform: template
+    name: "Stopwatch Start Stop"
+    on_press:
+      - script.execute: sw_toggle
+  - platform: template
+    name: "Stopwatch Reset"
+    on_press:
+      - script.execute: sw_reset
 
 number:
   - platform: template
